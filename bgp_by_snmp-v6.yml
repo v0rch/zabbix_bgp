@@ -1,0 +1,149 @@
+zabbix_export:
+  version: '6.0'
+  templates:
+    - uuid: e1667e541a694bf686178a40feea143d
+      template: 'BGP by SNMP'
+      name: 'BGP by SNMP'
+      description: |
+        Template for monitoring the BGPv4 process by SNMP.
+        Jorn Ivar Holland
+      groups:
+        - name: Templates/Modules
+      items:
+        - uuid: fdd552f88ff04b2896cf5df109d13d5f
+          name: 'SNMP walk BGP'
+          type: SNMP_AGENT
+          snmp_oid: 'walk[1.3.6.1.2.1.15.3.1.2,1.3.6.1.2.1.15.3.1.7,1.3.6.1.2.1.15.3.1.9,1.3.6.1.2.1.15.3.1.16]'
+          key: bgp.walk
+          history: '0'
+          value_type: TEXT
+          trends: '0'
+          description: |
+            Discover BGP neighbors:
+            1.3.6.1.2.1.15.3.1.2 = Peer state.
+            1.3.6.1.2.1.15.3.1.7 = Remote peer id.
+            1.3.6.1.2.1.15.3.1.9 = Remote AS.
+            1.3.6.1.2.1.15.3.1.16 = Establish time.
+          tags:
+            - tag: protocol
+              value: raw
+      discovery_rules:
+        - uuid: 2019bbd13fb04d139de482b97c5c8a8e
+          name: 'BGP peer discovery'
+          type: DEPENDENT
+          key: bgp.discovery
+          delay: '0'
+          description: 'Discover BGP remote peer id.'
+          item_prototypes:
+            - uuid: 6ab954081e8f499bb4fda01efaf6f4b0
+              name: 'BGP peer {#SNMPVALUE} connection state'
+              type: DEPENDENT
+              key: 'bgp.peer.state[bgpPeerState.{#SNMPINDEX}]'
+              delay: '0'
+              trends: '0'
+              description: 'The BGP peer connection state.'
+              valuemap:
+                name: bgpPeerState
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var index = JSON.parse(value)[''{#SNMPINDEX}'']; var state_oid = ''1.3.6.1.2.1.15.3.1.2.'' + index; var state = Zabbix.OID(state_oid); return state;'
+              master_item:
+                key: bgp.walk
+              tags:
+                - tag: protocol
+                  value: bgp
+              trigger_prototypes:
+                - uuid: d3398517f9eb48508275306c5ca79291
+                  expression: 'last(/BGP by SNMP/bgp.peer.state[bgpPeerState.{#SNMPINDEX}])<>6'
+                  name: 'BGP: peer {#SNMPVALUE} is down'
+                  priority: HIGH
+                  description: 'BGP peer {#SNMPVALUE} in ASN {#BGP_REMOTE_AS} is not in established state.'
+                  tags:
+                    - tag: scope
+                      value: availability
+            - uuid: 0f54c9dc797a42b5a999f364ef0d4d0c
+              name: 'BGP peer {#SNMPVALUE} established time'
+              type: DEPENDENT
+              key: 'bgp.peer.time[bgpPeer2FsmEstablishedTime.{#SNMPINDEX}]'
+              delay: '0'
+              trends: '0'
+              units: seconds
+              description: 'This timer indicates how long (in seconds) this peer has been in the Established state or how long since this peer was last in the Established state.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var index = JSON.parse(value)[''{#SNMPINDEX}'']; var time_oid = ''1.3.6.1.2.1.15.3.1.16.'' + index; var time = Zabbix.OID(time_oid); return time;'
+              master_item:
+                key: bgp.walk
+              tags:
+                - tag: protocol
+                  value: bgp
+              trigger_prototypes:
+                - uuid: ce67c060d2534142a9e288630d81dd2c
+                  expression: 'last(/BGP by SNMP/bgp.peer.time[bgpPeer2FsmEstablishedTime.{#SNMPINDEX}])<{$PEER_ESTABLISHED_TIME}'
+                  name: 'BGP: peer {#SNMPVALUE} has low up time'
+                  priority: INFO
+                  description: 'Up time is less than {$PEER_ESTABLISHED_TIME} seconds for BGP peer {#SNMPVALUE} in ASN {#BGP_REMOTE_AS}.'
+                  tags:
+                    - tag: scope
+                      value: notice
+          master_item:
+            key: bgp.walk
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var values = value.split(/\s+/);
+                  var result = [];
+                  var temp = {};
+                  for (var i = 0; i < values.length; i += 2) {
+                    var oid = values[i].replace('.1.3.6.1.2.1.15.3.1.7.', '').replace(/.1.3.6.1.2.1.15.3.1.9./, '').replace(/.1.3.6.1.2.1.15.3.1.2./, '').replace(/.1.3.6.1.2.1.15.3.1.16./, '');
+                    var val = values[i+1];
+                    if (!temp[oid]) {
+                      temp[oid] = {
+                        '{#BGP_REMOTE_PEER_ID}': '',
+                        '{#BGP_REMOTE_AS}': '',
+                        '{#SNMPINDEX}': oid
+                      };
+                    }
+                    if (values[i].indexOf('1.3.6.1.2.1.15.3.1.7.') !== -1) {
+                      temp[oid]['{#BGP_REMOTE_PEER_ID}'] = val;
+                    } else if (values[i].indexOf('1.3.6.1.2.1.15.3.1.9.') !== -1) {
+                      temp[oid]['{#BGP_REMOTE_AS}'] = val;
+                    }
+                  }
+                  for (var key in temp) {
+                    if (temp.hasOwnProperty(key)) {
+                      result.push(temp[key]);
+                    }
+                  }
+                  return JSON.stringify(result);
+      tags:
+        - tag: class
+          value: network
+        - tag: target
+          value: bgp
+      macros:
+        - macro: '{$PEER_ESTABLISHED_TIME}'
+          value: '14400'
+          description: 'Time in sec'
+      valuemaps:
+        - uuid: 2c874367ecef4ad68dd127f1f6826c73
+          name: bgpPeerState
+          mappings:
+            - value: '1'
+              newvalue: idle
+            - value: '2'
+              newvalue: connect
+            - value: '3'
+              newvalue: active
+            - value: '4'
+              newvalue: opensent
+            - value: '5'
+              newvalue: openconfirm
+            - value: '6'
+              newvalue: established

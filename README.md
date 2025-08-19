@@ -8,4 +8,6 @@ The template uses
 [snmp bulk requests](https://www.zabbix.com/documentation/current/en/manual/config/items/itemtypes/snmp?hl=SNMP%2Cdiscovery#native-snmp-bulk-requests)
 for discovery which require Zabbix version 6.4 or greater.
 
+v6 template for Zabbix version 6.0
+
 ☕️ Jørn Ivar
